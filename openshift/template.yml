@@ -1,0 +1,384 @@
+kind: Template
+apiVersion: v1
+metadata:
+  name: reservesuisse
+  annotations:
+    openshift.io/display-name: Réservesuisse
+    description: The Reservesuisse application
+    tags: zeilenwerk
+    iconClass: icon-rails
+    openshift.io/provider-display-name: Zeilenwerk
+    openshift.io/long-description: Depends on a secret named 'bitbucket-pull' (ssh key to pull the source code from bitbucket)
+    template.openshift.io/bindable: "false"
+message: "The following service(s) have been created in your project: ${NAME}, ${NAME}-sftp-abacus. Don't forget to register a WebHook in Bitbucket with the secret ${BITBUCKET_TRIGGER_SECRET}."
+labels:
+  template: reservesuisse-v1
+objects:
+  # SFTP servers
+
+  - kind: BuildConfig
+    apiVersion: v1
+    metadata:
+      name: ${NAME}-sftp
+      labels:
+        app: ${NAME}
+      annotations:
+        template.alpha.openshift.io/wait-for-ready: "true"
+    spec:
+      triggers:
+        - type: ImageChange
+        - type: ConfigChange
+        - type: GitHub
+          github:
+            secret: ${GITHUB_TRIGGER_SECRET}
+      source:
+        type: Git
+        git:
+          uri: https://github.com/Zeilenwerk/sftp.git
+      strategy:
+        type: Docker
+      output:
+        to:
+          kind: ImageStreamTag
+          name: ${NAME}-sftp:latest
+  - kind: ImageStream
+    apiVersion: v1
+    metadata:
+      name: ${NAME}-sftp
+      labels:
+        app: ${NAME}
+
+  # EZV
+
+  - kind: Secret
+    apiVersion: v1
+    metadata:
+      name: ${NAME}-sftp-ezv
+      labels:
+        app: ${NAME}
+    stringData:
+      sftp-user: sftp
+      sftp-encrypted-password: ${SFTP_ENCRYPTED_PASSWORD_EZV}
+  - kind: PersistentVolumeClaim
+    apiVersion: v1
+    metadata:
+      name: ${NAME}-sftp-ezv
+      labels:
+        app: ${NAME}
+    spec:
+      accessModes:
+        - ReadWriteMany
+      resources:
+        requests:
+          storage: ${SFTP_SIZE_EZV}
+  - kind: DeploymentConfig
+    apiVersion: v1
+    metadata:
+      name: ${NAME}-sftp-ezv
+      labels:
+        app: ${NAME}
+      annotations:
+        template.alpha.openshift.io/wait-for-ready: "true"
+    spec:
+      triggers:
+        - type: ConfigChange
+        - type: ImageChange
+          imageChangeParams:
+            automatic: true
+            from:
+              kind: ImageStreamTag
+              name: ${NAME}-sftp:latest
+            containerNames:
+              - ${NAME}-sftp-ezv
+      selector:
+        name: ${NAME}-sftp-ezv
+      template:
+        metadata:
+          name: ${NAME}-sftp-ezv
+          labels:
+            name: ${NAME}-sftp-ezv
+        spec:
+          containers:
+            - name: ${NAME}-sftp-ezv
+              image: ${NAME}:latest
+              ports:
+                - containerPort: 2222
+              env:
+                - name: USER_ENCRYPTED_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: ${NAME}-sftp-ezv
+                      key: sftp-encrypted-password
+              volumeMounts:
+                - name: upload
+                  mountPath: /home/sftp/upload
+          volumes:
+            - name: upload
+              persistentVolumeClaim:
+                claimName: ${NAME}-sftp-ezv
+      replicas: 1
+      strategy:
+        type: Rolling
+      revisionHistoryLimit: 3
+  - kind: Service
+    apiVersion: v1
+    metadata:
+      name: ${NAME}-sftp-ezv
+      labels:
+        app: ${NAME}
+      annotations:
+        service.alpha.openshift.io/dependencies: '[{"name": "${NAME}-sftp-ezv", "kind": "Service"}]'
+    spec:
+      type: LoadBalancer
+      externalIPs:
+        - 185.72.22.86
+      selector:
+        name: ${NAME}-sftp-ezv
+      ports:
+        - name: ssh
+          port: 22
+          targetPort: 2222
+
+  # ERP
+
+  - kind: Secret
+    apiVersion: v1
+    metadata:
+      name: ${NAME}-sftp-erp
+      labels:
+        app: ${NAME}
+    stringData:
+      sftp-user: sftp
+      sftp-encrypted-password: ${SFTP_ENCRYPTED_PASSWORD_ERP}
+  - kind: PersistentVolumeClaim
+    apiVersion: v1
+    metadata:
+      name: ${NAME}-sftp-erp
+      labels:
+        app: ${NAME}
+    spec:
+      accessModes:
+        - ReadWriteMany
+      resources:
+        requests:
+          storage: ${SFTP_SIZE_ERP}
+  - kind: DeploymentConfig
+    apiVersion: v1
+    metadata:
+      name: ${NAME}-sftp-erp
+      labels:
+        app: ${NAME}
+      annotations:
+        template.alpha.openshift.io/wait-for-ready: "true"
+    spec:
+      triggers:
+        - type: ConfigChange
+        - type: ImageChange
+          imageChangeParams:
+            automatic: true
+            from:
+              kind: ImageStreamTag
+              name: ${NAME}-sftp:latest
+            containerNames:
+              - ${NAME}-sftp-erp
+      selector:
+        name: ${NAME}-sftp-erp
+      template:
+        metadata:
+          name: ${NAME}-sftp-erp
+          labels:
+            name: ${NAME}-sftp-erp
+        spec:
+          containers:
+            - name: ${NAME}-sftp-erp
+              image: ${NAME}:latest
+              ports:
+                - containerPort: 2222
+              env:
+                - name: USER_ENCRYPTED_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: ${NAME}-sftp-erp
+                      key: sftp-encrypted-password
+              volumeMounts:
+                - name: upload
+                  mountPath: /home/sftp/upload
+          volumes:
+            - name: upload
+              persistentVolumeClaim:
+                claimName: ${NAME}-sftp-erp
+      replicas: 1
+      strategy:
+        type: Rolling
+      revisionHistoryLimit: 3
+  - kind: Service
+    apiVersion: v1
+    metadata:
+      name: ${NAME}-sftp-erp
+      labels:
+        app: ${NAME}
+      annotations:
+        service.alpha.openshift.io/dependencies: '[{"name": "${NAME}-sftp-erp", "kind": "Service"}]'
+    spec:
+      type: LoadBalancer
+      externalIPs:
+        - 185.72.22.83
+      selector:
+        name: ${NAME}-sftp-erp
+      ports:
+        - name: ssh
+          port: 22
+          targetPort: 2222
+
+  # App
+
+  - kind: Secret
+    apiVersion: v1
+    metadata:
+      name: ${NAME}-sftp-app
+      labels:
+        app: ${NAME}
+    stringData:
+      sftp-user: sftp
+      sftp-encrypted-password: ${SFTP_ENCRYPTED_PASSWORD_ERP}
+  - kind: DeploymentConfig
+    apiVersion: v1
+    metadata:
+      name: ${NAME}-sftp-app
+      labels:
+        app: ${NAME}
+      annotations:
+        template.alpha.openshift.io/wait-for-ready: "true"
+    spec:
+      triggers:
+        - type: ConfigChange
+        - type: ImageChange
+          imageChangeParams:
+            automatic: true
+            from:
+              kind: ImageStreamTag
+              name: ${NAME}-sftp:latest
+            containerNames:
+              - ${NAME}-sftp-app
+      selector:
+        name: ${NAME}-sftp-app
+      template:
+        metadata:
+          name: ${NAME}-sftp-app
+          labels:
+            name: ${NAME}-sftp-app
+        spec:
+          containers:
+            - name: ${NAME}-sftp-app
+              image: ${NAME}:latest
+              ports:
+                - containerPort: 2222
+              env:
+                - name: USER_ENCRYPTED_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: ${NAME}-sftp-app
+                      key: sftp-encrypted-password
+              volumeMounts:
+                - name: upload-erp
+                  mountPath: /home/sftp/upload-erp
+                - name: upload-ezv
+                  mountPath: /home/sftp/upload-ezv
+          volumes:
+            - name: upload-erp
+              persistentVolumeClaim:
+                claimName: ${NAME}-sftp-erp
+            - name: upload-ezv
+              persistentVolumeClaim:
+                claimName: ${NAME}-sftp-ezv
+      replicas: 1
+      strategy:
+        type: Rolling
+      revisionHistoryLimit: 3
+parameters:
+  - name: NAME
+    displayName: Name
+    description: The name of your application. Will be added as a label to all resources.
+    required: true
+    value: reservesuisse
+  - name: APPLICATION_HOSTNAME
+    displayName: Application Hostname
+    description: The exposed hostname that will route to the Rails service, if left blank a value will be defaulted.
+    value: reservesuisse-api
+  - name: APPLICATION_HOSTNAME_WEB
+    displayName: Application Hostname Web
+    description: The exposed hostname that will route to the Node service, if left blank a value will be defaulted.
+    value: reservesuisse
+  - name: SOURCE_REPOSITORY_URL
+    displayName: Source Repository URL
+    description: The URL of the repository with your application source code
+    required: true
+    value: git@bitbucket.org:Zeilenwerk/syh.git
+  - name: SOURCE_REPOSITORY_REF
+    displayName: Source Repository Ref
+    description: The branch name, tag or other ref of your repository if you are not using the default branch
+  - name: BITBUCKET_TRIGGER_SECRET
+    displayName: Bitbucket Trigger Secret
+    description: Bitbucket trigger secret. A difficult to guess string encoded as part of the webhook URL. Not encrypted.
+    required: true
+    generate: expression
+    from: "[a-zA-Z0-9]{40}"
+  - name: APPLICATION_ENV
+    displayName: App environment
+    description: Used as the environment variables RAILS_ENV and NODE_ENV. production, development or test.
+    required: true
+    value: production
+  - name: SECRET_KEY_BASE
+    displayName: Secret Key Base
+    description: Your secret key for verifying the integrity of signed cookies
+    required: true
+    generate: expression
+    from: "[a-z0-9]{127}"
+  - name: DATABASE_NAME
+    displayName: Database Name
+    description: The name of the database in PostgreSQL
+    required: true
+    value: "root"
+  - name: DATABASE_USER
+    displayName: Database User
+    description: The username of the user created in PostgreSQL
+    required: true
+    generate: expression
+    from: "user[A-Z0-9]{3}"
+  - name: DATABASE_PASSWORD
+    displayName: Database Password
+    required: true
+    description: The password of the user created in PostgreSQL
+    generate: expression
+    from: "[a-zA-Z0-9]{26}"
+  - name: DATABASE_SIZE
+    displayName: Database Size
+    required: true
+    description: The size of the database volume
+    value: 1G
+  - name: SFTP_ENCRYPTED_PASSWORD_EZV
+    displayName: SFTP Encrypted Password EZV
+    required: true
+    description: The password of the SFTP user created for EZV
+  - name: SFTP_SIZE_EZV
+    displayName: SFTP Size EZV
+    required: true
+    description: The size of the SFTP volume for EZV
+    value: 1G
+  - name: SFTP_HOSTNAME_EZV
+    displayName: SFTP Hostname EZV
+    description: The exposed hostname that will route to the SFTP hostname for EZV, if left blank a value will be defaulted.
+    value: reservesuisse-sftp-ezv
+  - name: SFTP_ENCRYPTED_PASSWORD_ERP
+    displayName: SFTP Encrypted Password ERP
+    required: true
+    description: The password of the SFTP user created for ERP
+  - name: SFTP_SIZE_ERP
+    displayName: SFTP Size ERP
+    required: true
+    description: The size of the SFTP volume for ERP
+    value: 1G
+  - name: SFTP_HOSTNAME_ERP
+    displayName: SFTP Hostname ERP
+    description: The exposed hostname that will route to the SFTP hostname for ERP, if left blank a value will be defaulted.
+    value: reservesuisse-sftp-erp
